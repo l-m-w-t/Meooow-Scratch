@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>數位刮刮卡</title>
+  <title>Meooow Scratch</title>
   <style>
     html, body {
       margin: 0;
@@ -31,7 +31,6 @@
       background: #111;
     }
 
-    /* 底圖：請準備 main-visual.jpg，放在同一資料夾 */
     #mainVisual {
       position: absolute;
       inset: 0;
@@ -43,7 +42,6 @@
       z-index: 1;
     }
 
-    /* 上層銀膜 */
     #scratchCanvas {
       position: absolute;
       inset: 0;
@@ -70,7 +68,7 @@
       border-radius: 999px;
       background: rgba(0, 0, 0, 0.45);
       color: white;
-      font-size: 22px;
+      font-size: 16px;
       line-height: 1.4;
       pointer-events: none;
       transition: opacity 0.3s ease;
@@ -81,7 +79,6 @@
       opacity: 0;
     }
 
-    /* 載入錯誤提示 */
     #error {
       position: fixed;
       inset: 0;
@@ -93,7 +90,7 @@
       box-sizing: border-box;
       background: #111;
       color: #fff;
-      font-size: 22px;
+      font-size: 16px;
       line-height: 1.7;
       text-align: center;
     }
@@ -106,13 +103,31 @@
     <canvas id="scratchCanvas"></canvas>
   </div>
 
-  <div id="hint">用手指刮開銀膜</div>
+  <div id="hint">動動手指 刮刮看</div>
   <div id="error">
     圖片載入失敗。<br>
     請確認 main-visual.jpg 與 index.html 放在同一個資料夾，且檔名完全一致。
   </div>
 
   <script>
+    // ===== 使用者可調設定 =====
+    const CONFIG = {
+      mainVisualSrc: "main-visual.jpg",
+      silverImageSrc: "silver.png", // 可選；沒有 silver.png 時會自動生成銀膜
+
+      mobileWidth: 768,              // 視窗寬度小於此數值，視為手機
+      mobileBrushRadius: 20,         // 手機：刮除半徑 20px
+      desktopBrushHeightRatio: 0.04, // 大螢幕：刮除半徑 = 螢幕高度 × 0.04
+
+      pressureEnabled: true,         // 支援感壓的設備會依壓力改變粗細
+      minPressureScale: 0.5,        // 最細倍率
+      maxPressureScale: 1.5,        // 最粗倍率
+
+      idleResetTime: 20 * 1000,      // 20 秒無操作後重置
+      resetFadeTime: 0             // 重置淡出時間
+    };
+    // ========================
+
     const canvas = document.getElementById("scratchCanvas");
     const ctx = canvas.getContext("2d");
     const hint = document.getElementById("hint");
@@ -121,13 +136,19 @@
 
     let isDrawing = false;
     let resetTimer = null;
-
-    const idleResetTime = 60 * 1000; // 60 秒無操作後重置
-    const brushSize = 75;           // 刮除半徑，可依螢幕尺寸調整
-    const silverImageSrc = "silver.png"; // 可選。若沒有 silver.png，會自動產生銀膜
+    let useCustomSilver = false;
+    let lastX = null;
+    let lastY = null;
 
     const silverImage = new Image();
-    let useCustomSilver = false;
+    mainVisual.src = CONFIG.mainVisualSrc;
+
+    function getBrushRadius() {
+      if (window.innerWidth < CONFIG.mobileWidth) {
+        return CONFIG.mobileBrushRadius;
+      }
+      return window.innerHeight * CONFIG.desktopBrushHeightRatio;
+    }
 
     function setupCanvasSize() {
       const dpr = window.devicePixelRatio || 1;
@@ -136,7 +157,6 @@
 
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
-
       canvas.style.width = width + "px";
       canvas.style.height = height + "px";
 
@@ -172,7 +192,6 @@
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
 
-      // 銀膜細顆粒
       const grainCount = Math.floor((width * height) / 250);
       for (let i = 0; i < grainCount; i++) {
         const x = Math.random() * width;
@@ -182,7 +201,6 @@
         ctx.fillRect(x, y, 1.5, 1.5);
       }
 
-      // 斜向刮刮膜紋理
       ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
       ctx.lineWidth = 2;
 
@@ -193,7 +211,6 @@
         ctx.stroke();
       }
 
-      // 提示文字可直接畫在銀膜上，若不需要可刪除這段
       ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
       ctx.font = "bold 32px sans-serif";
       ctx.textAlign = "center";
@@ -204,7 +221,6 @@
     function drawImageCover(context, image, x, y, width, height) {
       const canvasRatio = width / height;
       const imageRatio = image.naturalWidth / image.naturalHeight;
-
       let drawWidth, drawHeight, offsetX, offsetY;
 
       if (imageRatio > canvasRatio) {
@@ -226,45 +242,83 @@
       const rect = canvas.getBoundingClientRect();
       const point = event.touches && event.touches.length > 0 ? event.touches[0] : event;
 
+      // PointerEvent 的 pressure 才是真正可用的感壓資料。
+      // touch / mouse 大多沒有可靠感壓，因此會回到 0.5 的預設值。
+      let pressure = 0.5;
+
+      if (event.pressure && event.pressure > 0) {
+        pressure = event.pressure;
+      }
+
       return {
         x: point.clientX - rect.left,
-        y: point.clientY - rect.top
+        y: point.clientY - rect.top,
+        pressure: pressure
       };
     }
 
-    function scratchAt(x, y) {
+    function scratchAt(x, y, pressure = 0.5) {
+      const baseRadius = getBrushRadius();
+
+      let radius = baseRadius;
+
+      if (CONFIG.pressureEnabled) {
+        const scaleRange = CONFIG.maxPressureScale - CONFIG.minPressureScale;
+        const pressureScale = CONFIG.minPressureScale + pressure * scaleRange;
+        radius = baseRadius * pressureScale;
+      }
+
       ctx.globalCompositeOperation = "destination-out";
-      ctx.beginPath();
-      ctx.arc(x, y, brushSize, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = radius * 2;
+
+      if (lastX === null || lastY === null) {
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+
+      lastX = x;
+      lastY = y;
+
       hint.classList.add("is-hidden");
     }
 
     function startScratch(event) {
       event.preventDefault();
       isDrawing = true;
-
       const pos = getPointerPosition(event);
-      scratchAt(pos.x, pos.y);
+      lastX = pos.x;
+      lastY = pos.y;
+      scratchAt(pos.x, pos.y, pos.pressure);
       scheduleReset();
     }
 
     function moveScratch(event) {
       if (!isDrawing) return;
       event.preventDefault();
-
       const pos = getPointerPosition(event);
-      scratchAt(pos.x, pos.y);
+      lastX = pos.x;
+      lastY = pos.y;
+      scratchAt(pos.x, pos.y, pos.pressure);
       scheduleReset();
     }
 
     function stopScratch() {
       isDrawing = false;
+      lastX = null;
+      lastY = null;
     }
 
     function scheduleReset() {
       clearTimeout(resetTimer);
-      resetTimer = setTimeout(resetScratchCard, idleResetTime);
+      resetTimer = setTimeout(resetScratchCard, CONFIG.idleResetTime);
     }
 
     function resetScratchCard() {
@@ -273,12 +327,7 @@
       setTimeout(() => {
         drawSilverLayer();
         scheduleReset();
-      }, 450);
-    }
-
-    function init() {
-      setupCanvasSize();
-      scheduleReset();
+      }, CONFIG.resetFadeTime);
     }
 
     mainVisual.onload = () => {
@@ -289,7 +338,6 @@
       errorBox.style.display = "flex";
     };
 
-    // 嘗試載入自訂銀膜。沒有 silver.png 也沒關係，會使用程式生成銀膜。
     silverImage.onload = () => {
       useCustomSilver = true;
       setupCanvasSize();
@@ -300,22 +348,31 @@
       setupCanvasSize();
     };
 
-    silverImage.src = silverImageSrc;
+    silverImage.src = CONFIG.silverImageSrc;
 
-    canvas.addEventListener("mousedown", startScratch);
-    canvas.addEventListener("mousemove", moveScratch);
-    canvas.addEventListener("mouseup", stopScratch);
-    canvas.addEventListener("mouseleave", stopScratch);
+    if (window.PointerEvent) {
+      canvas.addEventListener("pointerdown", startScratch);
+      canvas.addEventListener("pointermove", moveScratch);
+      canvas.addEventListener("pointerup", stopScratch);
+      canvas.addEventListener("pointercancel", stopScratch);
+      canvas.addEventListener("pointerleave", stopScratch);
+    } else {
+      canvas.addEventListener("mousedown", startScratch);
+      canvas.addEventListener("mousemove", moveScratch);
+      canvas.addEventListener("mouseup", stopScratch);
+      canvas.addEventListener("mouseleave", stopScratch);
 
-    canvas.addEventListener("touchstart", startScratch, { passive: false });
-    canvas.addEventListener("touchmove", moveScratch, { passive: false });
-    canvas.addEventListener("touchend", stopScratch);
-    canvas.addEventListener("touchcancel", stopScratch);
+      canvas.addEventListener("touchstart", startScratch, { passive: false });
+      canvas.addEventListener("touchmove", moveScratch, { passive: false });
+      canvas.addEventListener("touchend", stopScratch);
+      canvas.addEventListener("touchcancel", stopScratch);
+    }
 
     window.addEventListener("resize", setupCanvasSize);
     window.addEventListener("orientationchange", setupCanvasSize);
 
-    init();
+    setupCanvasSize();
+    scheduleReset();
   </script>
 </body>
 </html>
