@@ -54,6 +54,25 @@ html,body{
   transition:opacity .25s ease;
   white-space:nowrap;
 }
+#imageLink{
+  position:fixed;
+  right:28px;
+  bottom:28px;
+  z-index:4;
+  display:none;
+  padding:12px 20px;
+  border-radius:999px;
+  background:rgba(0,0,0,.72);
+  color:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC",sans-serif;
+  font-size:18px;
+  line-height:1.4;
+  text-decoration:none;
+  box-shadow:0 4px 16px rgba(0,0,0,.25);
+}
+#imageLink:hover{
+  background:rgba(0,0,0,.86);
+}
 #error{
   position:fixed;
   inset:0;
@@ -78,16 +97,30 @@ html,body{
   <img id="mainVisual" alt="主視覺">
   <canvas id="scratchCanvas"></canvas>
 </div>
-<div id="hint">動動手指 刮刮看</div>
+
+<div id="hint">動動手指 刮刮喵</div>
+<a id="imageLink" href="#" target="_blank" rel="noopener noreferrer">查看更多喵喵</a>
 <div id="error"></div>
 
 <script>
 const CONFIG = {
-  // 請把底圖依序命名，並放在同一個資料夾
+  // 每張圖可以對應自己的網址與按鈕文字
   mainImages: [
-    "main-visual-01.jpg",
-    "main-visual-02.jpg",
-    "main-visual-03.jpg"
+    {
+      image: "main-visual-01.jpg",
+      url: "https://www.google.com/search?q=angry+cat&sca_esv=0d90d5c973b1aedc&udm=2&biw=1728&bih=907&sxsrf=APpeQntV_L3iP5y7oCauSWOt0v5IblXbJw%3A1783587890684&ei=MmRPaqGlKcSavr0PocL6wA0&ved=0ahUKEwihhpnVnsWVAxVEja8BHSGhHtgQ4dUDCBE&uact=5&oq=angry+cat&gs_lp=Egtnd3Mtd2l6LWltZyIJYW5ncnkgY2F0MgUQABiABDIFEAAYgAQyBhAAGAcYHjIGEAAYBxgeMgYQABgHGB4yBhAAGAcYHjIGEAAYBxgeMgYQABgHGB4yBhAAGAcYHjIFEAAYgARI8hNQkApYuRFwAngAkAEAmAFhoAGqAqoBATW4AQPIAQD4AQGYAgegAsACwgIHEAAYgAQYCsICCBAAGAcYHhgTmAMAiAYBkgcBN6AHhQyyBwE1uAe8AsIHBTAuNi4xyAcOgAgB&sclient=gws-wiz-img",
+      text: "查看更多森七喵喵"
+    },
+    {
+      image: "main-visual-02.jpg",
+      url: "https://www.google.com/search?sa=X&sca_esv=0d90d5c973b1aedc&sxsrf=APpeQnsz5xwqJbzA7kRKqj0iq9uVNyD3DQ:1783587589846&udm=2&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOf1BDPCnJA7T66GFBo7wwhM5svZTbwL96qcNqo9o8OSTgVdu2kShqMetZh8UXJ3eqR2xXwXFJt3widcm6GNMm3Qlzcxyd7fJZEL1pT3l_ZSA5mwLbfHoOVJ0hETILqyub_tmqI024nYw1JEyln4JNwSniqB3mH-eW5esZOynyLIdYkTY-&q=cute+cat&ved=2ahUKEwj-o9_FncWVAxXNQPUHHXPaI8QQtKgLegQIEBAB&biw=1728&bih=907&dpr=2",
+      text: "查看更多可愛喵喵"
+    },
+    {
+      image: "main-visual-03.jpg",
+      url: "https://www.google.com/search?q=calm+cat&sca_esv=0d90d5c973b1aedc&udm=2&biw=1728&bih=907&sxsrf=APpeQnszS_gii5M0-h4h0WYpda8T-ud7ow%3A1783587938309&ei=YmRPatC0Esucvr0Pg-3gqAo&ved=0ahUKEwjQ7fPrnsWVAxVLjq8BHYM2GKUQ4dUDCBE&uact=5&oq=calm+cat&gs_lp=Egtnd3Mtd2l6LWltZyIIY2FsbSBjYXQyBhAAGAcYHjIGEAAYBxgeMgYQABgHGB4yBhAAGAcYHjIGEAAYBxgeMgYQABgHGB4yBhAAGAcYHjIGEAAYBxgeMgYQABgHGB4yCBAAGAcYHhgKSJoJUABY8AZwAHgAkAEAmAEtoAGeAaoBATS4AQPIAQD4AQGYAgSgAq0BwgIFEAAYgASYAwCSBwE0oAe2CbIHATS4B60BwgcDMC40yAcIgAgB&sclient=gws-wiz-img",
+      text: "查看更多放鬆喵喵"
+    }
   ],
 
   silverImage: "silver.png",
@@ -96,27 +129,30 @@ const CONFIG = {
   mobileBrushRadius: 20,
   desktopBrushHeightRatio: 0.04,
 
-  // 20 秒無操作後恢復銀膜
   idleResetTime: 20 * 1000,
-  resetFadeTime: 450
+  resetFadeTime: 450,
+
+  // true：刮開後顯示連結；false：一開始就顯示連結
+  showLinkAfterScratch: true
 };
 
 const canvas = document.getElementById("scratchCanvas");
 const ctx = canvas.getContext("2d");
 const mainVisual = document.getElementById("mainVisual");
 const hint = document.getElementById("hint");
+const imageLink = document.getElementById("imageLink");
 const errorBox = document.getElementById("error");
 
 const silver = new Image();
 
 let drawing = false;
+let hasScratched = false;
 let lastX = null;
 let lastY = null;
 let timer = null;
-let currentImage = null;
-let lastImage = null;
+let currentItem = null;
+let lastItem = null;
 
-// 先打亂清單，逐張使用；用完再重新洗牌
 let imageQueue = [];
 
 function showError(message) {
@@ -133,25 +169,40 @@ function shuffle(array) {
   return result;
 }
 
-function getNextImage() {
+function getNextItem() {
   if (imageQueue.length === 0) {
     imageQueue = shuffle(CONFIG.mainImages);
 
-    // 避免新一輪第一張剛好與上一輪最後一張相同
-    if (lastImage && imageQueue.length > 1 && imageQueue[0] === lastImage) {
+    if (
+      lastItem &&
+      imageQueue.length > 1 &&
+      imageQueue[0].image === lastItem.image
+    ) {
       const swapIndex = 1 + Math.floor(Math.random() * (imageQueue.length - 1));
       [imageQueue[0], imageQueue[swapIndex]] = [imageQueue[swapIndex], imageQueue[0]];
     }
   }
 
   const next = imageQueue.shift();
-  lastImage = next;
+  lastItem = next;
   return next;
 }
 
 function setRandomMainImage() {
-  currentImage = getNextImage();
-  mainVisual.src = currentImage;
+  currentItem = getNextItem();
+
+  mainVisual.src = currentItem.image;
+
+  imageLink.href = currentItem.url || "#";
+  imageLink.textContent = currentItem.text || "查看更多喵喵";
+
+  if (CONFIG.showLinkAfterScratch) {
+    imageLink.style.display = "none";
+  } else {
+    imageLink.style.display = currentItem.url ? "block" : "none";
+  }
+
+  hasScratched = false;
 }
 
 function brushRadius() {
@@ -215,6 +266,11 @@ function pos(e) {
   };
 }
 
+function showCurrentLink() {
+  if (!currentItem || !currentItem.url) return;
+  imageLink.style.display = "block";
+}
+
 function eraseLine(x, y) {
   const radius = brushRadius();
 
@@ -247,11 +303,23 @@ function eraseLine(x, y) {
 
   lastX = x;
   lastY = y;
+
   hint.style.opacity = 0;
+
+  if (!hasScratched) {
+    hasScratched = true;
+    if (CONFIG.showLinkAfterScratch) {
+      showCurrentLink();
+    }
+  }
 }
 
 function start(e) {
   e.preventDefault();
+
+  // 如果使用者點到連結，交給連結本身處理
+  if (e.target === imageLink) return;
+
   drawing = true;
 
   const p = pos(e);
@@ -281,8 +349,6 @@ function resetScratchCard() {
   canvas.classList.add("fade");
 
   setTimeout(() => {
-    // 20 秒重置時換下一張底圖；
-    // 觀眾下一次刮開時看到的就是新圖
     setRandomMainImage();
     drawSilver();
     resetTimer();
@@ -297,8 +363,8 @@ function resetTimer() {
 mainVisual.onerror = () => {
   showError(
     "底圖載入失敗。<br>" +
-    "請確認 CONFIG.mainImages 內的檔名與資料夾中的圖片完全一致。<br>" +
-    "目前嘗試載入：" + currentImage
+    "請確認 CONFIG.mainImages 內的 image 檔名與資料夾中的圖片完全一致。<br>" +
+    "目前嘗試載入：" + (currentItem ? currentItem.image : "")
   );
 };
 
