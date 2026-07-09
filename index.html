@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>數位刮刮卡</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #111;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      position: fixed;
+      inset: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", sans-serif;
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #111;
+    }
+
+    /* 底圖：請準備 main-visual.jpg，放在同一資料夾 */
+    #mainVisual {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover; /* 若想完整顯示不裁切，改成 contain */
+      object-position: center;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* 上層銀膜 */
+    #scratchCanvas {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+      z-index: 2;
+      opacity: 1;
+      transition: opacity 0.45s ease;
+    }
+
+    #scratchCanvas.is-resetting {
+      opacity: 0;
+    }
+
+    #hint {
+      position: fixed;
+      left: 50%;
+      bottom: 40px;
+      transform: translateX(-50%);
+      z-index: 3;
+      padding: 12px 24px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
+      color: white;
+      font-size: 22px;
+      line-height: 1.4;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      white-space: nowrap;
+    }
+
+    #hint.is-hidden {
+      opacity: 0;
+    }
+
+    /* 載入錯誤提示 */
+    #error {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      box-sizing: border-box;
+      background: #111;
+      color: #fff;
+      font-size: 22px;
+      line-height: 1.7;
+      text-align: center;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="stage">
+    <img id="mainVisual" src="main-visual.jpg" alt="主視覺" />
+    <canvas id="scratchCanvas"></canvas>
+  </div>
+
+  <div id="hint">用手指刮開銀膜</div>
+  <div id="error">
+    圖片載入失敗。<br>
+    請確認 main-visual.jpg 與 index.html 放在同一個資料夾，且檔名完全一致。
+  </div>
+
+  <script>
+    const canvas = document.getElementById("scratchCanvas");
+    const ctx = canvas.getContext("2d");
+    const hint = document.getElementById("hint");
+    const mainVisual = document.getElementById("mainVisual");
+    const errorBox = document.getElementById("error");
+
+    let isDrawing = false;
+    let resetTimer = null;
+
+    const idleResetTime = 60 * 1000; // 60 秒無操作後重置
+    const brushSize = 75;           // 刮除半徑，可依螢幕尺寸調整
+    const silverImageSrc = "silver.png"; // 可選。若沒有 silver.png，會自動產生銀膜
+
+    const silverImage = new Image();
+    let useCustomSilver = false;
+
+    function setupCanvasSize() {
+      const dpr = window.devicePixelRatio || 1;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+
+      canvas.style.width = width + "px";
+      canvas.style.height = height + "px";
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawSilverLayer();
+    }
+
+    function drawSilverLayer() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, width, height);
+
+      if (useCustomSilver && silverImage.complete && silverImage.naturalWidth > 0) {
+        drawImageCover(ctx, silverImage, 0, 0, width, height);
+      } else {
+        drawGeneratedSilver(width, height);
+      }
+
+      hint.classList.remove("is-hidden");
+      canvas.classList.remove("is-resetting");
+    }
+
+    function drawGeneratedSilver(width, height) {
+      const gradient = ctx.createLinearGradient(0, 0, width, height);
+      gradient.addColorStop(0, "#d7d7d7");
+      gradient.addColorStop(0.25, "#f2f2f2");
+      gradient.addColorStop(0.5, "#b7b7b7");
+      gradient.addColorStop(0.75, "#eeeeee");
+      gradient.addColorStop(1, "#a8a8a8");
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+
+      // 銀膜細顆粒
+      const grainCount = Math.floor((width * height) / 250);
+      for (let i = 0; i < grainCount; i++) {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+        const alpha = Math.random() * 0.16;
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        ctx.fillRect(x, y, 1.5, 1.5);
+      }
+
+      // 斜向刮刮膜紋理
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+      ctx.lineWidth = 2;
+
+      for (let x = -height; x < width; x += 36) {
+        ctx.beginPath();
+        ctx.moveTo(x, height);
+        ctx.lineTo(x + height, 0);
+        ctx.stroke();
+      }
+
+      // 提示文字可直接畫在銀膜上，若不需要可刪除這段
+      ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
+      ctx.font = "bold 32px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("SCRATCH", width / 2, height / 2);
+    }
+
+    function drawImageCover(context, image, x, y, width, height) {
+      const canvasRatio = width / height;
+      const imageRatio = image.naturalWidth / image.naturalHeight;
+
+      let drawWidth, drawHeight, offsetX, offsetY;
+
+      if (imageRatio > canvasRatio) {
+        drawHeight = height;
+        drawWidth = image.naturalWidth * (height / image.naturalHeight);
+        offsetX = x + (width - drawWidth) / 2;
+        offsetY = y;
+      } else {
+        drawWidth = width;
+        drawHeight = image.naturalHeight * (width / image.naturalWidth);
+        offsetX = x;
+        offsetY = y + (height - drawHeight) / 2;
+      }
+
+      context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+    }
+
+    function getPointerPosition(event) {
+      const rect = canvas.getBoundingClientRect();
+      const point = event.touches && event.touches.length > 0 ? event.touches[0] : event;
+
+      return {
+        x: point.clientX - rect.left,
+        y: point.clientY - rect.top
+      };
+    }
+
+    function scratchAt(x, y) {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.beginPath();
+      ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+      ctx.fill();
+      hint.classList.add("is-hidden");
+    }
+
+    function startScratch(event) {
+      event.preventDefault();
+      isDrawing = true;
+
+      const pos = getPointerPosition(event);
+      scratchAt(pos.x, pos.y);
+      scheduleReset();
+    }
+
+    function moveScratch(event) {
+      if (!isDrawing) return;
+      event.preventDefault();
+
+      const pos = getPointerPosition(event);
+      scratchAt(pos.x, pos.y);
+      scheduleReset();
+    }
+
+    function stopScratch() {
+      isDrawing = false;
+    }
+
+    function scheduleReset() {
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(resetScratchCard, idleResetTime);
+    }
+
+    function resetScratchCard() {
+      canvas.classList.add("is-resetting");
+
+      setTimeout(() => {
+        drawSilverLayer();
+        scheduleReset();
+      }, 450);
+    }
+
+    function init() {
+      setupCanvasSize();
+      scheduleReset();
+    }
+
+    mainVisual.onload = () => {
+      errorBox.style.display = "none";
+    };
+
+    mainVisual.onerror = () => {
+      errorBox.style.display = "flex";
+    };
+
+    // 嘗試載入自訂銀膜。沒有 silver.png 也沒關係，會使用程式生成銀膜。
+    silverImage.onload = () => {
+      useCustomSilver = true;
+      setupCanvasSize();
+    };
+
+    silverImage.onerror = () => {
+      useCustomSilver = false;
+      setupCanvasSize();
+    };
+
+    silverImage.src = silverImageSrc;
+
+    canvas.addEventListener("mousedown", startScratch);
+    canvas.addEventListener("mousemove", moveScratch);
+    canvas.addEventListener("mouseup", stopScratch);
+    canvas.addEventListener("mouseleave", stopScratch);
+
+    canvas.addEventListener("touchstart", startScratch, { passive: false });
+    canvas.addEventListener("touchmove", moveScratch, { passive: false });
+    canvas.addEventListener("touchend", stopScratch);
+    canvas.addEventListener("touchcancel", stopScratch);
+
+    window.addEventListener("resize", setupCanvasSize);
+    window.addEventListener("orientationchange", setupCanvasSize);
+
+    init();
+  </script>
+</body>
+</html>
