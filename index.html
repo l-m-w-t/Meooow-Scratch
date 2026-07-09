@@ -1,378 +1,148 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Meooow Scratch</title>
-  <style>
-    html, body {
-      margin: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #111;
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    body {
-      position: fixed;
-      inset: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", sans-serif;
-    }
-
-    #stage {
-      position: fixed;
-      inset: 0;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-      background: #111;
-    }
-
-    #mainVisual {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover; /* 若想完整顯示不裁切，改成 contain */
-      object-position: center;
-      pointer-events: none;
-      z-index: 1;
-    }
-
-    #scratchCanvas {
-      position: absolute;
-      inset: 0;
-      display: block;
-      width: 100%;
-      height: 100%;
-      cursor: pointer;
-      z-index: 2;
-      opacity: 1;
-      transition: opacity 0.45s ease;
-    }
-
-    #scratchCanvas.is-resetting {
-      opacity: 0;
-    }
-
-    #hint {
-      position: fixed;
-      left: 50%;
-      bottom: 40px;
-      transform: translateX(-50%);
-      z-index: 3;
-      padding: 12px 24px;
-      border-radius: 999px;
-      background: rgba(0, 0, 0, 0.45);
-      color: white;
-      font-size: 16px;
-      line-height: 1.4;
-      pointer-events: none;
-      transition: opacity 0.3s ease;
-      white-space: nowrap;
-    }
-
-    #hint.is-hidden {
-      opacity: 0;
-    }
-
-    #error {
-      position: fixed;
-      inset: 0;
-      z-index: 10;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 32px;
-      box-sizing: border-box;
-      background: #111;
-      color: #fff;
-      font-size: 16px;
-      line-height: 1.7;
-      text-align: center;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Meooow Scratch</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;touch-action:none;-webkit-user-select:none;user-select:none}
+#stage{position:fixed;inset:0}
+#mainVisual,#scratchCanvas{position:absolute;inset:0;width:100%;height:100%}
+#mainVisual{object-fit:cover;z-index:1;pointer-events:none}
+#scratchCanvas{z-index:2;transition:opacity .45s}
+#scratchCanvas.fade{opacity:0}
+#hint{position:fixed;left:50%;bottom:36px;transform:translateX(-50%);z-index:3;padding:10px 20px;border-radius:999px;background:rgba(0,0,0,.45);color:#fff}
+</style>
 </head>
-
 <body>
-  <div id="stage">
-    <img id="mainVisual" src="main-visual.jpg" alt="主視覺" />
-    <canvas id="scratchCanvas"></canvas>
-  </div>
+<div id="stage">
+<img id="mainVisual" src="main-visual.jpg">
+<canvas id="scratchCanvas"></canvas>
+</div>
+<div id="hint">動動手指 刮刮看・ω・</div>
+<script>
+const CONFIG={
+ mobileWidth:768,
+ mobileBrushRadius:20,
+ desktopBrushHeightRatio:0.04,
+ idleResetTime:60000,
+ resetFadeTime:0,
+ silverImage:"silver.png"
+};
 
-  <div id="hint">動動手指 刮刮看</div>
-  <div id="error">
-    圖片載入失敗。<br>
-    請確認 main-visual.jpg 與 index.html 放在同一個資料夾，且檔名完全一致。
-  </div>
+const canvas=document.getElementById("scratchCanvas");
+const ctx=canvas.getContext("2d");
+const hint=document.getElementById("hint");
+const silver=new Image();
 
-  <script>
-    // ===== 使用者可調設定 =====
-    const CONFIG = {
-      mainVisualSrc: "main-visual.jpg",
-      silverImageSrc: "silver.png", // 可選；沒有 silver.png 時會自動生成銀膜
+let drawing=false,lastX=null,lastY=null,timer=null;
 
-      mobileWidth: 768,              // 視窗寬度小於此數值，視為手機
-      mobileBrushRadius: 20,         // 手機：刮除半徑 20px
-      desktopBrushHeightRatio: 0.04, // 大螢幕：刮除半徑 = 螢幕高度 × 0.04
+function brushRadius(){
+ return window.innerWidth<CONFIG.mobileWidth?
+ CONFIG.mobileBrushRadius:
+ window.innerHeight*CONFIG.desktopBrushHeightRatio;
+}
 
-      pressureEnabled: true,         // 支援感壓的設備會依壓力改變粗細
-      minPressureScale: 0.5,        // 最細倍率
-      maxPressureScale: 1.5,        // 最粗倍率
+function fit(img){
+ const w=window.innerWidth,h=window.innerHeight;
+ const ir=img.naturalWidth/img.naturalHeight;
+ const cr=w/h;
+ let dw,dh,dx,dy;
+ if(ir>cr){dh=h;dw=img.naturalWidth*h/img.naturalHeight;dx=(w-dw)/2;dy=0;}
+ else{dw=w;dh=img.naturalHeight*w/img.naturalWidth;dx=0;dy=(h-dh)/2;}
+ ctx.drawImage(img,dx,dy,dw,dh);
+}
 
-      idleResetTime: 20 * 1000,      // 20 秒無操作後重置
-      resetFadeTime: 0             // 重置淡出時間
-    };
-    // ========================
+function drawSilver(){
+ const dpr=window.devicePixelRatio||1;
+ canvas.width=window.innerWidth*dpr;
+ canvas.height=window.innerHeight*dpr;
+ canvas.style.width=window.innerWidth+"px";
+ canvas.style.height=window.innerHeight+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ ctx.clearRect(0,0,window.innerWidth,window.innerHeight);
+ fit(silver);
+ hint.style.opacity=1;
+ canvas.classList.remove("fade");
+}
 
-    const canvas = document.getElementById("scratchCanvas");
-    const ctx = canvas.getContext("2d");
-    const hint = document.getElementById("hint");
-    const mainVisual = document.getElementById("mainVisual");
-    const errorBox = document.getElementById("error");
+function pos(e){
+ const r=canvas.getBoundingClientRect();
+ const p=e.touches?e.touches[0]:e;
+ return {x:p.clientX-r.left,y:p.clientY-r.top};
+}
 
-    let isDrawing = false;
-    let resetTimer = null;
-    let useCustomSilver = false;
-    let lastX = null;
-    let lastY = null;
+function eraseLine(x,y){
+ const radius=brushRadius();
+ ctx.globalCompositeOperation="destination-out";
+ ctx.lineCap="round";
+ ctx.lineJoin="round";
+ ctx.lineWidth=radius*2;
 
-    const silverImage = new Image();
-    mainVisual.src = CONFIG.mainVisualSrc;
+ if(lastX===null){
+   ctx.beginPath();
+   ctx.arc(x,y,radius,0,Math.PI*2);
+   ctx.fill();
+ }else{
+   const dx=x-lastX,dy=y-lastY;
+   const dist=Math.hypot(dx,dy);
+   const step=Math.max(radius*0.35,2);
+   const n=Math.max(Math.ceil(dist/step),1);
 
-    function getBrushRadius() {
-      if (window.innerWidth < CONFIG.mobileWidth) {
-        return CONFIG.mobileBrushRadius;
-      }
-      return window.innerHeight * CONFIG.desktopBrushHeightRatio;
-    }
+   ctx.beginPath();
+   ctx.moveTo(lastX,lastY);
+   for(let i=1;i<=n;i++){
+      const t=i/n;
+      ctx.lineTo(lastX+dx*t,lastY+dy*t);
+   }
+   ctx.stroke();
+ }
+ lastX=x;lastY=y;
+ hint.style.opacity=0;
+}
 
-    function setupCanvasSize() {
-      const dpr = window.devicePixelRatio || 1;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
+function start(e){
+ e.preventDefault();
+ drawing=true;
+ const p=pos(e);
+ lastX=p.x;lastY=p.y;
+ eraseLine(p.x,p.y);
+ resetTimer();
+}
+function move(e){
+ if(!drawing)return;
+ e.preventDefault();
+ const p=pos(e);
+ eraseLine(p.x,p.y);
+ resetTimer();
+}
+function end(){
+ drawing=false;
+ lastX=null;lastY=null;
+}
+function resetTimer(){
+ clearTimeout(timer);
+ timer=setTimeout(()=>{
+   canvas.classList.add("fade");
+   setTimeout(drawSilver,CONFIG.resetFadeTime);
+ },CONFIG.idleResetTime);
+}
 
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
+silver.onload=()=>{drawSilver();resetTimer();}
+silver.onerror=()=>alert("找不到 silver.png，V7 已移除程式生成銀膜，請提供 silver.png。");
+silver.src=CONFIG.silverImage;
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawSilverLayer();
-    }
+window.addEventListener("resize",drawSilver);
 
-    function drawSilverLayer() {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
+canvas.addEventListener("mousedown",start);
+canvas.addEventListener("mousemove",move);
+canvas.addEventListener("mouseup",end);
+canvas.addEventListener("mouseleave",end);
 
-      ctx.globalCompositeOperation = "source-over";
-      ctx.clearRect(0, 0, width, height);
-
-      if (useCustomSilver && silverImage.complete && silverImage.naturalWidth > 0) {
-        drawImageCover(ctx, silverImage, 0, 0, width, height);
-      } else {
-        drawGeneratedSilver(width, height);
-      }
-
-      hint.classList.remove("is-hidden");
-      canvas.classList.remove("is-resetting");
-    }
-
-    function drawGeneratedSilver(width, height) {
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, "#d7d7d7");
-      gradient.addColorStop(0.25, "#f2f2f2");
-      gradient.addColorStop(0.5, "#b7b7b7");
-      gradient.addColorStop(0.75, "#eeeeee");
-      gradient.addColorStop(1, "#a8a8a8");
-
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-
-      const grainCount = Math.floor((width * height) / 250);
-      for (let i = 0; i < grainCount; i++) {
-        const x = Math.random() * width;
-        const y = Math.random() * height;
-        const alpha = Math.random() * 0.16;
-        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        ctx.fillRect(x, y, 1.5, 1.5);
-      }
-
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
-      ctx.lineWidth = 2;
-
-      for (let x = -height; x < width; x += 36) {
-        ctx.beginPath();
-        ctx.moveTo(x, height);
-        ctx.lineTo(x + height, 0);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
-      ctx.font = "bold 32px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("SCRATCH", width / 2, height / 2);
-    }
-
-    function drawImageCover(context, image, x, y, width, height) {
-      const canvasRatio = width / height;
-      const imageRatio = image.naturalWidth / image.naturalHeight;
-      let drawWidth, drawHeight, offsetX, offsetY;
-
-      if (imageRatio > canvasRatio) {
-        drawHeight = height;
-        drawWidth = image.naturalWidth * (height / image.naturalHeight);
-        offsetX = x + (width - drawWidth) / 2;
-        offsetY = y;
-      } else {
-        drawWidth = width;
-        drawHeight = image.naturalHeight * (width / image.naturalWidth);
-        offsetX = x;
-        offsetY = y + (height - drawHeight) / 2;
-      }
-
-      context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
-    }
-
-    function getPointerPosition(event) {
-      const rect = canvas.getBoundingClientRect();
-      const point = event.touches && event.touches.length > 0 ? event.touches[0] : event;
-
-      // PointerEvent 的 pressure 才是真正可用的感壓資料。
-      // touch / mouse 大多沒有可靠感壓，因此會回到 0.5 的預設值。
-      let pressure = 0.5;
-
-      if (event.pressure && event.pressure > 0) {
-        pressure = event.pressure;
-      }
-
-      return {
-        x: point.clientX - rect.left,
-        y: point.clientY - rect.top,
-        pressure: pressure
-      };
-    }
-
-    function scratchAt(x, y, pressure = 0.5) {
-      const baseRadius = getBrushRadius();
-
-      let radius = baseRadius;
-
-      if (CONFIG.pressureEnabled) {
-        const scaleRange = CONFIG.maxPressureScale - CONFIG.minPressureScale;
-        const pressureScale = CONFIG.minPressureScale + pressure * scaleRange;
-        radius = baseRadius * pressureScale;
-      }
-
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.lineWidth = radius * 2;
-
-      if (lastX === null || lastY === null) {
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(lastX, lastY);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      }
-
-      lastX = x;
-      lastY = y;
-
-      hint.classList.add("is-hidden");
-    }
-
-    function startScratch(event) {
-      event.preventDefault();
-      isDrawing = true;
-      const pos = getPointerPosition(event);
-      lastX = pos.x;
-      lastY = pos.y;
-      scratchAt(pos.x, pos.y, pos.pressure);
-      scheduleReset();
-    }
-
-    function moveScratch(event) {
-      if (!isDrawing) return;
-      event.preventDefault();
-      const pos = getPointerPosition(event);
-      lastX = pos.x;
-      lastY = pos.y;
-      scratchAt(pos.x, pos.y, pos.pressure);
-      scheduleReset();
-    }
-
-    function stopScratch() {
-      isDrawing = false;
-      lastX = null;
-      lastY = null;
-    }
-
-    function scheduleReset() {
-      clearTimeout(resetTimer);
-      resetTimer = setTimeout(resetScratchCard, CONFIG.idleResetTime);
-    }
-
-    function resetScratchCard() {
-      canvas.classList.add("is-resetting");
-
-      setTimeout(() => {
-        drawSilverLayer();
-        scheduleReset();
-      }, CONFIG.resetFadeTime);
-    }
-
-    mainVisual.onload = () => {
-      errorBox.style.display = "none";
-    };
-
-    mainVisual.onerror = () => {
-      errorBox.style.display = "flex";
-    };
-
-    silverImage.onload = () => {
-      useCustomSilver = true;
-      setupCanvasSize();
-    };
-
-    silverImage.onerror = () => {
-      useCustomSilver = false;
-      setupCanvasSize();
-    };
-
-    silverImage.src = CONFIG.silverImageSrc;
-
-    if (window.PointerEvent) {
-      canvas.addEventListener("pointerdown", startScratch);
-      canvas.addEventListener("pointermove", moveScratch);
-      canvas.addEventListener("pointerup", stopScratch);
-      canvas.addEventListener("pointercancel", stopScratch);
-      canvas.addEventListener("pointerleave", stopScratch);
-    } else {
-      canvas.addEventListener("mousedown", startScratch);
-      canvas.addEventListener("mousemove", moveScratch);
-      canvas.addEventListener("mouseup", stopScratch);
-      canvas.addEventListener("mouseleave", stopScratch);
-
-      canvas.addEventListener("touchstart", startScratch, { passive: false });
-      canvas.addEventListener("touchmove", moveScratch, { passive: false });
-      canvas.addEventListener("touchend", stopScratch);
-      canvas.addEventListener("touchcancel", stopScratch);
-    }
-
-    window.addEventListener("resize", setupCanvasSize);
-    window.addEventListener("orientationchange", setupCanvasSize);
-
-    setupCanvasSize();
-    scheduleReset();
-  </script>
+canvas.addEventListener("touchstart",start,{passive:false});
+canvas.addEventListener("touchmove",move,{passive:false});
+canvas.addEventListener("touchend",end);
+canvas.addEventListener("touchcancel",end);
+</script>
 </body>
 </html>
