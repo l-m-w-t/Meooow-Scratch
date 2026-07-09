@@ -46,7 +46,7 @@ html,body{
   z-index:3;
   padding:10px 20px;
   border-radius:999px;
-  background:rgba(0,0,0,.45);
+  background:transparent;
   color:#fff;
   font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC",sans-serif;
   font-size:18px;
@@ -54,13 +54,24 @@ html,body{
   transition:opacity .25s ease;
   white-space:nowrap;
 }
-#imageLink{
+#controlPanel{
+  --button-height:46px;
   position:fixed;
   left:50%;
   bottom:10%;
   transform:translateX(-50%);
   z-index:4;
   display:none;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+}
+#imageLink{
+  min-height:var(--button-height);
+  box-sizing:border-box;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   padding:10px 20px;
   border-radius:999px;
   background:rgba(0,0,0,.72);
@@ -70,6 +81,27 @@ html,body{
   line-height:1.4;
   text-decoration:none;
   box-shadow:0 4px 16px rgba(0,0,0,.25);
+}
+#refreshBtn{
+  width:var(--button-height);
+  height:var(--button-height);
+  box-sizing:border-box;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 var(--button-height);
+  padding:0;
+  border:0;
+  border-radius:50%;
+  background:rgba(0,0,0,.72);
+  box-shadow:0 4px 16px rgba(0,0,0,.25);
+  cursor:pointer;
+}
+#refreshBtn img{
+  width:22px;
+  height:22px;
+  display:block;
+  pointer-events:none;
 }
 #error{
   position:fixed;
@@ -97,7 +129,12 @@ html,body{
 </div>
 
 <div id="hint">動動手指 刮刮喵</div>
-<a id="imageLink" href="#" target="_blank" rel="noopener noreferrer">查看更多喵喵</a>
+<div id="controlPanel">
+  <a id="imageLink" href="#" target="_blank" rel="noopener noreferrer">查看更多喵喵</a>
+  <button id="refreshBtn" type="button" aria-label="再測一次">
+    <img src="refresh.svg" alt="">
+  </button>
+</div>
 <div id="error"></div>
 
 <script>
@@ -138,7 +175,9 @@ const canvas = document.getElementById("scratchCanvas");
 const ctx = canvas.getContext("2d");
 const mainVisual = document.getElementById("mainVisual");
 const hint = document.getElementById("hint");
+const controlPanel = document.getElementById("controlPanel");
 const imageLink = document.getElementById("imageLink");
+const refreshBtn = document.getElementById("refreshBtn");
 const errorBox = document.getElementById("error");
 
 const silver = new Image();
@@ -195,9 +234,9 @@ function setRandomMainImage() {
   imageLink.textContent = currentItem.text || "查看更多喵喵";
 
   if (CONFIG.showLinkAfterScratch) {
-    imageLink.style.display = "none";
+    controlPanel.style.display = "none";
   } else {
-    imageLink.style.display = currentItem.url ? "block" : "none";
+    controlPanel.style.display = currentItem.url ? "flex" : "none";
   }
 
   hasScratched = false;
@@ -266,7 +305,7 @@ function pos(e) {
 
 function showCurrentLink() {
   if (!currentItem || !currentItem.url) return;
-  imageLink.style.display = "block";
+  controlPanel.style.display = "flex";
 }
 
 function eraseLine(x, y) {
@@ -315,8 +354,8 @@ function eraseLine(x, y) {
 function start(e) {
   e.preventDefault();
 
-  // 如果使用者點到連結，交給連結本身處理
-  if (e.target === imageLink) return;
+  // 如果使用者點到控制按鈕，交給按鈕本身處理
+  if (e.target.closest && e.target.closest("#controlPanel")) return;
 
   drawing = true;
 
@@ -344,13 +383,13 @@ function end() {
 }
 
 function resetScratchCard() {
-  canvas.classList.add("fade");
+  // 先把銀膜重新畫回來，確保新底圖不會在未刮開前露出
+  drawSilver();
 
-  setTimeout(() => {
-    setRandomMainImage();
-    drawSilver();
-    resetTimer();
-  }, CONFIG.resetFadeTime);
+  // 銀膜覆蓋後，再更換下一張底圖
+  setRandomMainImage();
+
+  resetTimer();
 }
 
 function resetTimer() {
@@ -382,6 +421,12 @@ silver.onerror = () => {
 silver.src = CONFIG.silverImage;
 
 window.addEventListener("resize", drawSilver);
+
+refreshBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  clearTimeout(timer);
+  resetScratchCard();
+});
 
 canvas.addEventListener("mousedown", start);
 canvas.addEventListener("mousemove", move);
