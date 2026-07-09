@@ -5,144 +5,329 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Meooow Scratch</title>
 <style>
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;touch-action:none;-webkit-user-select:none;user-select:none}
-#stage{position:fixed;inset:0}
-#mainVisual,#scratchCanvas{position:absolute;inset:0;width:100%;height:100%}
-#mainVisual{object-fit:cover;z-index:1;pointer-events:none}
-#scratchCanvas{z-index:2;transition:opacity .45s}
-#scratchCanvas.fade{opacity:0}
-#hint{position:fixed;left:50%;bottom:36px;transform:translateX(-50%);z-index:3;padding:10px 20px;border-radius:999px;background:rgba(0,0,0,.45);color:#fff}
+html,body{
+  margin:0;
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#111;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+#stage{
+  position:fixed;
+  inset:0;
+}
+#mainVisual,#scratchCanvas{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+}
+#mainVisual{
+  object-fit:cover;
+  object-position:center;
+  z-index:1;
+  pointer-events:none;
+}
+#scratchCanvas{
+  z-index:2;
+  transition:opacity .45s ease;
+}
+#scratchCanvas.fade{
+  opacity:0;
+}
+#hint{
+  position:fixed;
+  left:50%;
+  bottom:36px;
+  transform:translateX(-50%);
+  z-index:3;
+  padding:10px 20px;
+  border-radius:999px;
+  background:rgba(0,0,0,.45);
+  color:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC",sans-serif;
+  font-size:18px;
+  pointer-events:none;
+  transition:opacity .25s ease;
+  white-space:nowrap;
+}
+#error{
+  position:fixed;
+  inset:0;
+  z-index:10;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:32px;
+  box-sizing:border-box;
+  background:#111;
+  color:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC",sans-serif;
+  font-size:20px;
+  line-height:1.7;
+  text-align:center;
+}
 </style>
 </head>
+
 <body>
 <div id="stage">
-<img id="mainVisual" src="main-visual.jpg">
-<canvas id="scratchCanvas"></canvas>
+  <img id="mainVisual" alt="主視覺">
+  <canvas id="scratchCanvas"></canvas>
 </div>
-<div id="hint">動動手指 刮刮看・ω・</div>
+<div id="hint">動動手指 刮刮看</div>
+<div id="error"></div>
+
 <script>
-const CONFIG={
- mobileWidth:768,
- mobileBrushRadius:20,
- desktopBrushHeightRatio:0.04,
- idleResetTime:60000,
- resetFadeTime:0,
- silverImage:"silver.png"
+const CONFIG = {
+  // 請把底圖依序命名，並放在同一個資料夾
+  mainImages: [
+    "main-visual-01.jpg",
+    "main-visual-02.jpg",
+    "main-visual-03.jpg"
+  ],
+
+  silverImage: "silver.png",
+
+  mobileWidth: 768,
+  mobileBrushRadius: 20,
+  desktopBrushHeightRatio: 0.04,
+
+  // 20 秒無操作後恢復銀膜
+  idleResetTime: 20 * 1000,
+  resetFadeTime: 450
 };
 
-const canvas=document.getElementById("scratchCanvas");
-const ctx=canvas.getContext("2d");
-const hint=document.getElementById("hint");
-const silver=new Image();
+const canvas = document.getElementById("scratchCanvas");
+const ctx = canvas.getContext("2d");
+const mainVisual = document.getElementById("mainVisual");
+const hint = document.getElementById("hint");
+const errorBox = document.getElementById("error");
 
-let drawing=false,lastX=null,lastY=null,timer=null;
+const silver = new Image();
 
-function brushRadius(){
- return window.innerWidth<CONFIG.mobileWidth?
- CONFIG.mobileBrushRadius:
- window.innerHeight*CONFIG.desktopBrushHeightRatio;
+let drawing = false;
+let lastX = null;
+let lastY = null;
+let timer = null;
+let currentImage = null;
+let lastImage = null;
+
+// 先打亂清單，逐張使用；用完再重新洗牌
+let imageQueue = [];
+
+function showError(message) {
+  errorBox.innerHTML = message;
+  errorBox.style.display = "flex";
 }
 
-function fit(img){
- const w=window.innerWidth,h=window.innerHeight;
- const ir=img.naturalWidth/img.naturalHeight;
- const cr=w/h;
- let dw,dh,dx,dy;
- if(ir>cr){dh=h;dw=img.naturalWidth*h/img.naturalHeight;dx=(w-dw)/2;dy=0;}
- else{dw=w;dh=img.naturalHeight*w/img.naturalWidth;dx=0;dy=(h-dh)/2;}
- ctx.drawImage(img,dx,dy,dw,dh);
+function shuffle(array) {
+  const result = array.slice();
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
 }
 
-function drawSilver(){
- const dpr=window.devicePixelRatio||1;
- canvas.width=window.innerWidth*dpr;
- canvas.height=window.innerHeight*dpr;
- canvas.style.width=window.innerWidth+"px";
- canvas.style.height=window.innerHeight+"px";
- ctx.setTransform(dpr,0,0,dpr,0,0);
- ctx.clearRect(0,0,window.innerWidth,window.innerHeight);
- fit(silver);
- hint.style.opacity=1;
- canvas.classList.remove("fade");
+function getNextImage() {
+  if (imageQueue.length === 0) {
+    imageQueue = shuffle(CONFIG.mainImages);
+
+    // 避免新一輪第一張剛好與上一輪最後一張相同
+    if (lastImage && imageQueue.length > 1 && imageQueue[0] === lastImage) {
+      const swapIndex = 1 + Math.floor(Math.random() * (imageQueue.length - 1));
+      [imageQueue[0], imageQueue[swapIndex]] = [imageQueue[swapIndex], imageQueue[0]];
+    }
+  }
+
+  const next = imageQueue.shift();
+  lastImage = next;
+  return next;
 }
 
-function pos(e){
- const r=canvas.getBoundingClientRect();
- const p=e.touches?e.touches[0]:e;
- return {x:p.clientX-r.left,y:p.clientY-r.top};
+function setRandomMainImage() {
+  currentImage = getNextImage();
+  mainVisual.src = currentImage;
 }
 
-function eraseLine(x,y){
- const radius=brushRadius();
- ctx.globalCompositeOperation="destination-out";
- ctx.lineCap="round";
- ctx.lineJoin="round";
- ctx.lineWidth=radius*2;
-
- if(lastX===null){
-   ctx.beginPath();
-   ctx.arc(x,y,radius,0,Math.PI*2);
-   ctx.fill();
- }else{
-   const dx=x-lastX,dy=y-lastY;
-   const dist=Math.hypot(dx,dy);
-   const step=Math.max(radius*0.35,2);
-   const n=Math.max(Math.ceil(dist/step),1);
-
-   ctx.beginPath();
-   ctx.moveTo(lastX,lastY);
-   for(let i=1;i<=n;i++){
-      const t=i/n;
-      ctx.lineTo(lastX+dx*t,lastY+dy*t);
-   }
-   ctx.stroke();
- }
- lastX=x;lastY=y;
- hint.style.opacity=0;
+function brushRadius() {
+  return window.innerWidth < CONFIG.mobileWidth
+    ? CONFIG.mobileBrushRadius
+    : window.innerHeight * CONFIG.desktopBrushHeightRatio;
 }
 
-function start(e){
- e.preventDefault();
- drawing=true;
- const p=pos(e);
- lastX=p.x;lastY=p.y;
- eraseLine(p.x,p.y);
- resetTimer();
-}
-function move(e){
- if(!drawing)return;
- e.preventDefault();
- const p=pos(e);
- eraseLine(p.x,p.y);
- resetTimer();
-}
-function end(){
- drawing=false;
- lastX=null;lastY=null;
-}
-function resetTimer(){
- clearTimeout(timer);
- timer=setTimeout(()=>{
-   canvas.classList.add("fade");
-   setTimeout(drawSilver,CONFIG.resetFadeTime);
- },CONFIG.idleResetTime);
+function fitSilver(img) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const ir = img.naturalWidth / img.naturalHeight;
+  const cr = w / h;
+
+  let dw, dh, dx, dy;
+
+  if (ir > cr) {
+    dh = h;
+    dw = img.naturalWidth * h / img.naturalHeight;
+    dx = (w - dw) / 2;
+    dy = 0;
+  } else {
+    dw = w;
+    dh = img.naturalHeight * w / img.naturalWidth;
+    dx = 0;
+    dy = (h - dh) / 2;
+  }
+
+  ctx.drawImage(img, dx, dy, dw, dh);
 }
 
-silver.onload=()=>{drawSilver();resetTimer();}
-silver.onerror=()=>alert("找不到 silver.png，V7 已移除程式生成銀膜，請提供 silver.png。");
-silver.src=CONFIG.silverImage;
+function drawSilver() {
+  if (!silver.complete || silver.naturalWidth === 0) return;
 
-window.addEventListener("resize",drawSilver);
+  const dpr = window.devicePixelRatio || 1;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
 
-canvas.addEventListener("mousedown",start);
-canvas.addEventListener("mousemove",move);
-canvas.addEventListener("mouseup",end);
-canvas.addEventListener("mouseleave",end);
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
 
-canvas.addEventListener("touchstart",start,{passive:false});
-canvas.addEventListener("touchmove",move,{passive:false});
-canvas.addEventListener("touchend",end);
-canvas.addEventListener("touchcancel",end);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.clearRect(0, 0, width, height);
+
+  fitSilver(silver);
+
+  canvas.classList.remove("fade");
+  hint.style.opacity = 1;
+}
+
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  const p = e.touches ? e.touches[0] : e;
+
+  return {
+    x: p.clientX - r.left,
+    y: p.clientY - r.top
+  };
+}
+
+function eraseLine(x, y) {
+  const radius = brushRadius();
+
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = radius * 2;
+
+  if (lastX === null || lastY === null) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    const dx = x - lastX;
+    const dy = y - lastY;
+    const dist = Math.hypot(dx, dy);
+    const step = Math.max(radius * 0.35, 2);
+    const n = Math.max(Math.ceil(dist / step), 1);
+
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      ctx.lineTo(lastX + dx * t, lastY + dy * t);
+    }
+
+    ctx.stroke();
+  }
+
+  lastX = x;
+  lastY = y;
+  hint.style.opacity = 0;
+}
+
+function start(e) {
+  e.preventDefault();
+  drawing = true;
+
+  const p = pos(e);
+  lastX = p.x;
+  lastY = p.y;
+
+  eraseLine(p.x, p.y);
+  resetTimer();
+}
+
+function move(e) {
+  if (!drawing) return;
+  e.preventDefault();
+
+  const p = pos(e);
+  eraseLine(p.x, p.y);
+  resetTimer();
+}
+
+function end() {
+  drawing = false;
+  lastX = null;
+  lastY = null;
+}
+
+function resetScratchCard() {
+  canvas.classList.add("fade");
+
+  setTimeout(() => {
+    // 20 秒重置時換下一張底圖；
+    // 觀眾下一次刮開時看到的就是新圖
+    setRandomMainImage();
+    drawSilver();
+    resetTimer();
+  }, CONFIG.resetFadeTime);
+}
+
+function resetTimer() {
+  clearTimeout(timer);
+  timer = setTimeout(resetScratchCard, CONFIG.idleResetTime);
+}
+
+mainVisual.onerror = () => {
+  showError(
+    "底圖載入失敗。<br>" +
+    "請確認 CONFIG.mainImages 內的檔名與資料夾中的圖片完全一致。<br>" +
+    "目前嘗試載入：" + currentImage
+  );
+};
+
+silver.onload = () => {
+  setRandomMainImage();
+  drawSilver();
+  resetTimer();
+};
+
+silver.onerror = () => {
+  showError(
+    "找不到 silver.png。<br>" +
+    "此版本只使用 silver.png 作為表層銀膜，請確認檔名與位置。"
+  );
+};
+
+silver.src = CONFIG.silverImage;
+
+window.addEventListener("resize", drawSilver);
+
+canvas.addEventListener("mousedown", start);
+canvas.addEventListener("mousemove", move);
+canvas.addEventListener("mouseup", end);
+canvas.addEventListener("mouseleave", end);
+
+canvas.addEventListener("touchstart", start, { passive:false });
+canvas.addEventListener("touchmove", move, { passive:false });
+canvas.addEventListener("touchend", end);
+canvas.addEventListener("touchcancel", end);
 </script>
 </body>
 </html>
